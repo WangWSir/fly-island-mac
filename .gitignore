@@ -1,0 +1,13 @@
+# 构建产物
+build/
+*.app
+
+# 系统文件
+.DS_Store
+
+# 真实截图（含个人聊天内容，不入库；用 --render 生成的样张在 docs/screens/0*.png）
+docs/screens/real-*.png
+
+# 本地签名材料
+Tools/*.p12
+Tools/*.cer
