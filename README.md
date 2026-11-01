@@ -111,3 +111,7 @@ FlyIsland.app/Contents/MacOS/FlyIsland --demo       # 启动后自动展开/切�
 - 媒体信息依赖私有框架 `MediaRemote`，同样可能在系统升级后失效
 
 调试开关补充：`--axtest` 打印辅助功能抓到的横幅，`--axtest --axtree` 打印通知中心 AX 树（排查横幅结构变化时用）。
+
+## License
+
+[MIT](LICENSE)
