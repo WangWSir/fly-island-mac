@@ -17,9 +17,26 @@ macOS 版灵动岛。仿 [fly-island](https://github.com/flyl1u/fly-island) 的�
 
 ## 安装
 
+**方式一：下载现成包**
+
+到 [Releases](../../releases) 下载 `FlyIsland-1.0.0-macos-universal.zip`（Apple Silicon + Intel 通用），解压后把 `FlyIsland.app` 拖进「应用程序」。
+
+首次打开会被 Gatekeeper 拦（没有 Apple 开发者签名、未公证），两种放行方式任选：
+
+```bash
+# 方式 A：命令行
+xattr -dr com.apple.quarantine /Applications/FlyIsland.app && open /Applications/FlyIsland.app
+
+# 方式 B：图形界面
+# 右键 FlyIsland.app → 打开 → 弹窗里再点「打开」
+```
+
+**方式二：自己编译**
+
 ```bash
 cd FlyIsland
-./build.sh              # 产出 build/FlyIsland.app
+./build.sh                          # 产出 build/FlyIsland.app（当前架构）
+UNIVERSAL=1 SIGN_ID=- ./build.sh    # 通用二进制 + ad-hoc 签名，发布用
 cp -R build/FlyIsland.app /Applications/
 open /Applications/FlyIsland.app
 ```

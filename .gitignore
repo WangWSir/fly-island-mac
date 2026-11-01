@@ -11,3 +11,7 @@ docs/screens/real-*.png
 # 本地签名材料
 Tools/*.p12
 Tools/*.cer
+
+# 发布产物
+dist/
+build/.obj/
