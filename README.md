@@ -19,7 +19,7 @@ macOS 版灵动岛。仿 [fly-island](https://github.com/flyl1u/fly-island) 的�
 
 **方式一：下载现成包**
 
-到 [Releases](../../releases) 下载 `FlyIsland-1.0.0-macos-universal.zip`（Apple Silicon + Intel 通用），解压后把 `FlyIsland.app` 拖进「应用程序」。
+到 [Releases](../../releases/latest) 下载最新的 `FlyIsland-*-macos-universal.zip`（Apple Silicon + Intel 通用），解压后把 `FlyIsland.app` 拖进「应用程序」。
 
 首次打开会被 Gatekeeper 拦（没有 Apple 开发者签名、未公证），两种放行方式任选：
 

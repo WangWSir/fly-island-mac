@@ -52,6 +52,8 @@ final class IslandController {
     private var collapseWork: DispatchWorkItem?
     private var shrinkWork: DispatchWorkItem?
     private var monitors: [Any] = []
+    /// 当前是否把鼠标事件让给下层窗口
+    private var clickThrough = false
 
     /// 窗口最大尺寸（初始创建时使用，避免频繁重建窗口）
     private let maxWindow = CGSize(width: 660, height: 600)
@@ -113,6 +115,8 @@ final class IslandController {
         startHoverTracking()
         installMonitors()
         observeScreenChanges()
+        // 初始状态：光标不在岛上就立刻让出鼠标事件
+        updateClickThrough(inside: islandScreenRect().contains(NSEvent.mouseLocation))
     }
 
     var window: NSWindow { panel }
@@ -197,8 +201,9 @@ final class IslandController {
 
     private func pollHover() {
         let point = NSEvent.mouseLocation
-        let rect = islandScreenRect().insetBy(dx: -4, dy: -2)
-        let inside = rect.contains(point)
+        let inside = islandScreenRect().insetBy(dx: -4, dy: -2).contains(point)
+
+        updateClickThrough(inside: inside)
 
         if inside != model.hovering {
             model.hovering = inside
@@ -207,6 +212,24 @@ final class IslandController {
             } else {
                 scheduleCollapse()
             }
+        }
+    }
+
+    /// 窗口为画阴影比岛大一圈（左右下各 45pt）。这圈透明区域若不处理，
+    /// 点击会被窗口吃掉、传不到下面的菜单栏和别的应用 —— 按光标位置动态开关穿透。
+    private func updateClickThrough(inside: Bool) {
+        if inside {
+            if clickThrough {
+                clickThrough = false
+                panel.ignoresMouseEvents = false
+            }
+            return
+        }
+        // 按住鼠标（拖拽/划选）期间不切换，避免打断手势
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        if !clickThrough {
+            clickThrough = true
+            panel.ignoresMouseEvents = true
         }
     }
 
@@ -239,6 +262,15 @@ final class IslandController {
     // MARK: 事件
 
     private func installMonitors() {
+        // 光标移动时立即更新穿透状态（0.1s 轮询对快速划过不够快）
+        if let moved = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved], handler: { [weak self] _ in
+            guard let self else { return }
+            let inside = self.islandScreenRect().insetBy(dx: -4, dy: -2).contains(NSEvent.mouseLocation)
+            self.updateClickThrough(inside: inside)
+        }) {
+            monitors.append(moved)
+        }
+
         // 点击岛外收起
         if let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
             guard let self else { return }
