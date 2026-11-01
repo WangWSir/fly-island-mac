@@ -86,6 +86,7 @@ codesign -d -r- /Applications/FlyIsland.app
 |---|---|
 | 通知（实时） | 辅助功能遍历 `com.apple.notificationcenterui` 的窗口，取 `subrole=AXNotificationCenterBanner` 的元素：`AXAttributedDescription` 形如「App名 标题, 副标题, 正文」，配合子元素 `id=title/body` 还原字段；横幅 UUID 去重。轮询 0.35s，实测通知发出后 ~0.3s 弹出预览 |
 | 通知（事实源） | 只读 `~/Library/Group Containers/group.com.apple.usernoted/db2/db`，解析 `record.data` 的 plist（`req.titl` / `req.body`）；优先直接只读打开原库（零拷贝），失败退回快照；kqueue 监听 db 与 -wal，落盘即拉取，另有 0.3s 兜底轮询。系统落库延迟实测 ~5s，故仅作列表与跳转的依据 |
+| 通知（与系统同步） | 每次 poll 用「当前库内最近 7 天的 rec_id 集合」对账，系统通知中心被清空/单条划掉后（系统会删库里的行），这边同步消失；只保留 7 天内的记录，避免数据库里常年的守护进程残留一直挂在列表底部 |
 | 通知去重 | 实时通道弹过「应用+标题」后 10s 内，数据库通道补齐同一条时不再重复弹 |
 | 媒体（读） | macOS 15.4 起 `mediaremoted` 只服务 `com.apple.*` 进程，因此由 `/usr/bin/perl`（bundle id `com.apple.perl`）加载 `libislandmedia.dylib`，通过 `MediaRemote.framework` 私有符号读元数据，stdout 逐行 JSON 回传（2s 轮询 + 串行队列，父进程消失自杀） |
 | 媒体（控制） | `MRMediaRemoteSendCommand` 对部分播放器只回 `ok` 不动作（实测汽水音乐如此）。改为投递 NX_KEYTYPE 媒体键事件（等于按 F8/F9/F10），由系统派发给当前 NowPlaying 应用；无「辅助功能」权限时退回 MediaRemote 命令，媒体键 1.6s 内未生效也自动补一次命令。命令下发后 0.35s 主动拉一次状态，切歌界面秒更新 |

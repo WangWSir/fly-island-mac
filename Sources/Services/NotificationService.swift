@@ -36,6 +36,11 @@ final class NotificationService: ObservableObject {
     private var minPollInterval: TimeInterval = 0.2
 
     private static let appleEpoch: Double = 978307200
+    /// rec_id 超过这个值的是横幅通道临时造的 id（毫秒时间戳），不参与数据库对账
+    private static let dbIDThreshold: Int64 = 1_000_000_000
+    /// 只保留最近 7 天的记录 —— 数据库是流水账，通知中心「清空」后系统会删掉对应行，
+    /// 但一些守护进程的老记录会一直留着，不按时间过滤会永远挂在列表底部
+    private static let retention: TimeInterval = 7 * 24 * 3600
 
     /// 系统噪音 / 我们自己，不展示
     private static let blocklist: Set<String> = [
@@ -47,7 +52,9 @@ final class NotificationService: ObservableObject {
     ]
 
     private var dbPath: String {
-        NSHomeDirectory() + "/Library/Group Containers/group.com.apple.usernoted/db2/db"
+        // 测试可用 FLYISLAND_DB_PATH 指向副本，模拟「系统清空通知」
+        ProcessInfo.processInfo.environment["FLYISLAND_DB_PATH"]
+            ?? NSHomeDirectory() + "/Library/Group Containers/group.com.apple.usernoted/db2/db"
     }
 
     // MARK: 生命周期
@@ -203,6 +210,12 @@ final class NotificationService: ObservableObject {
         }
         lastError = nil
 
+        // 对账：数据库是事实来源。用户在通知中心「清空」后系统会删掉对应记录，
+        // 这里把本地已经不在库里的条目一并删掉，保持与系统通知中心一致。
+        if let ids = currentRecIDs() {
+            reconcile(with: ids)
+        }
+
         guard !rows.isEmpty else {
             bootstrapped = true
             return true
@@ -212,6 +225,7 @@ final class NotificationService: ObservableObject {
         if !bootstrapped {
             items = rows
                 .filter { !Self.blocklist.contains($0.bundleID) }
+                .filter { $0.date.timeIntervalSinceNow > -Self.retention }
                 .filter { !$0.title.trimmed.isEmpty || !$0.body.trimmed.isEmpty }
                 .map { NotificationItem(id: $0.id, bundleID: $0.bundleID, title: $0.title,
                                         body: $0.body, date: $0.date, isRead: true) }
@@ -328,6 +342,45 @@ final class NotificationService: ObservableObject {
             rows.append(Row(id: recID, bundleID: bundle, title: title, body: body, date: date))
         }
         return rows
+    }
+
+    /// 当前数据库里仍存在的记录 id（限最近 retention 窗口内，量很小）
+    private func currentRecIDs() -> Set<Int64>? {
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        let sql = "SELECT rec_id FROM record WHERE delivered_date > ? LIMIT 500;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970 - Self.retention - Self.appleEpoch)
+        var ids = Set<Int64>()
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            ids.insert(sqlite3_column_int64(stmt, 0))
+        }
+        return ids
+    }
+
+    /// 让本地列表与数据库对账：系统通知中心被清空/单条移除时，这边同步消失
+    private func reconcile(with ids: Set<Int64>) {
+        var removed = 0
+        items.removeAll { item in
+            let shouldRemove: Bool
+            if item.id > Self.dbIDThreshold {
+                // 横幅通道临时条目：按时间过期
+                shouldRemove = item.date.timeIntervalSinceNow < -Self.retention
+            } else {
+                shouldRemove = !ids.contains(item.id)
+            }
+            if shouldRemove { removed += 1 }
+            return shouldRemove
+        }
+        if removed > 0, ProcessInfo.processInfo.environment["FLYISLAND_DEBUG"] != nil {
+            NSLog("FlyIsland: 与系统通知对账，移除 %d 条", removed)
+        }
     }
 
     // MARK: 辅助功能实时通道
