@@ -24,10 +24,13 @@ final class NotificationService: ObservableObject {
     var onFastBanner: ((String, String, String, String) -> Void)?
 
     private var timer: Timer?
-    private var lastID: Int64 = 0
     private var bootstrapped = false
     private var axWatcher: AXNotificationWatcher?
     private var failStreak = 0
+    /// 已见过的数据库 rec_id 集合。
+    /// 不能只用「lastID 单调递增」判定新增：通知中心「清空」会重置 sqlite 自增序列，
+    /// 之后新通知的 rec_id 可能比旧的 lastID 还小，会被漏掉。
+    private var seenIDs: Set<Int64> = []
 
     // 文件事件监听：数据库一落盘就立刻拉取，不等轮询
     private var watchers: [DispatchSourceFileSystemObject] = []
@@ -89,7 +92,7 @@ final class NotificationService: ObservableObject {
                 }
             } else if Permissions.fullDiskAccess {
                 // 用户可能刚在设置里授权，重试
-                let ok = self.pollOnce(initial: self.lastID == 0)
+                let ok = self.pollOnce(initial: !self.bootstrapped)
                 if ok {
                     self.dbAvailable = true
                     self.startWatchers()
@@ -106,6 +109,14 @@ final class NotificationService: ObservableObject {
         stopWatchers()
         stopAXWatcher()
         pendingPoll?.cancel()
+    }
+
+    /// 权限变化后手动重试
+    func retry() {
+        let ok = pollOnce(initial: !bootstrapped)
+        dbAvailable = ok
+        if ok { startWatchers() }
+        if axAvailable { startAXWatcher() }
     }
 
     // MARK: 文件事件监听
@@ -162,14 +173,6 @@ final class NotificationService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// 权限变化后手动重试
-    func retry() {
-        let ok = pollOnce(initial: lastID == 0)
-        dbAvailable = ok
-        if ok { startWatchers() }
-        if axAvailable { startAXWatcher() }
-    }
-
     func markAllRead() {
         for i in items.indices { items[i].isRead = true }
     }
@@ -216,6 +219,11 @@ final class NotificationService: ObservableObject {
             reconcile(with: ids)
         }
 
+        // 维护 seenIDs，只保留仍在库里的 id，避免无限增长
+        if let ids = currentRecIDs() {
+            seenIDs.formIntersection(ids)
+        }
+
         guard !rows.isEmpty else {
             bootstrapped = true
             return true
@@ -229,19 +237,20 @@ final class NotificationService: ObservableObject {
                 .filter { !$0.title.trimmed.isEmpty || !$0.body.trimmed.isEmpty }
                 .map { NotificationItem(id: $0.id, bundleID: $0.bundleID, title: $0.title,
                                         body: $0.body, date: $0.date, isRead: true) }
-            lastID = rows.map(\.id).max() ?? lastID
+            seenIDs.formUnion(items.map(\.id))
             bootstrapped = true
             return true
         }
 
+        // 新增判定：用 seenIDs 集合（而非 lastID 单调递增），清空重置自增序列也不漏
         var fresh: [NotificationItem] = []
-        for row in rows where row.id > lastID {
+        for row in rows where !seenIDs.contains(row.id) {
             guard !Self.blocklist.contains(row.bundleID) else { continue }
             guard !row.title.trimmed.isEmpty || !row.body.trimmed.isEmpty else { continue }
             fresh.append(NotificationItem(id: row.id, bundleID: row.bundleID, title: row.title,
                                           body: row.body, date: row.date, isRead: false))
         }
-        lastID = max(lastID, rows.map(\.id).max() ?? lastID)
+        seenIDs.formUnion(rows.map(\.id))
         guard !fresh.isEmpty else { return true }
 
         if ProcessInfo.processInfo.environment["FLYISLAND_DEBUG"] != nil {
@@ -305,20 +314,19 @@ final class NotificationService: ObservableObject {
         defer { sqlite3_close(db) }
         sqlite3_exec(db, "PRAGMA query_only=1;", nil, nil, nil)
 
+        // 每次都读「近 7 天」全部记录（量很小），新增与否由 seenIDs 集合判定，
+        // 不依赖 rec_id 单调递增 —— 清空会重置自增序列，rec_id 可能回绕。
         let order = initial ? "DESC" : "ASC"
-        let filter = initial ? "" : "WHERE r.rec_id > ?"
         let sql = """
         SELECT r.rec_id, a.identifier, r.delivered_date, r.data
         FROM record r JOIN app a ON r.app_id = a.app_id
-        \(filter)
-        ORDER BY r.rec_id \(order) LIMIT 60;
+        WHERE r.delivered_date > ?
+        ORDER BY r.rec_id \(order) LIMIT 500;
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
-        if !initial {
-            sqlite3_bind_int64(stmt, 1, lastID)
-        }
+        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970 - Self.retention - Self.appleEpoch)
 
         var rows: [Row] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
