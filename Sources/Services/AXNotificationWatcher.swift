@@ -14,9 +14,16 @@ import ApplicationServices
 final class AXNotificationWatcher {
     /// title, body, appName, bundleID, 去重 key
     var onBanner: ((String, String, String, String, String) -> Void)?
+    /// 通知中心面板里的横幅从「有」变「无」—— 用户点了「清除」，立刻同步清空本地列表。
+    /// 不走数据库对账：系统把删除落库要 ~11s，这里走 UI 信号实现秒清。
+    var onPanelCleared: (() -> Void)?
 
     private var timer: Timer?
     private var seen: [String: Date] = [:]
+    /// 通知中心面板打开时，面板内横幅组数量；nil = 面板未打开
+    private var lastPanelBannerCount: Int?
+    /// 横幅归零的连续扫描次数（防渲染闪烁误判）
+    private var zeroStreak = 0
 
     func start() {
         stop()
@@ -38,14 +45,58 @@ final class AXNotificationWatcher {
         let apps = NSWorkspace.shared.runningApplications.filter {
             $0.bundleIdentifier == "com.apple.notificationcenterui"
         }
+        var panelSeen = false
         for app in apps {
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
             for window in elements(of: axApp, attribute: kAXWindowsAttribute as String) {
                 collect(window, depth: 0)
+                if watchClearPanel(window) { panelSeen = true }
             }
+        }
+        // 面板关闭：重置状态，避免下次打开渲染间隙误判为「清空」
+        if !panelSeen {
+            lastPanelBannerCount = nil
+            zeroStreak = 0
         }
         let now = Date()
         seen = seen.filter { now.timeIntervalSince($0.value) < 300 }
+    }
+
+    // MARK: 通知中心「清除」检测
+
+    /// 监控通知中心面板（标题为 Notification Center 的窗口）：
+    /// 面板打开且横幅组从 ≥1 变 0 —— 用户点了「清除」，立即回调 onPanelCleared。
+    /// 返回是否见到了 NC 面板。
+    private func watchClearPanel(_ window: AXUIElement) -> Bool {
+        let title = string(of: window, attribute: kAXTitleAttribute as String) ?? ""
+        guard title == "Notification Center" else { return false }
+        let count = countBanners(window, depth: 0)
+
+        if let last = lastPanelBannerCount, last >= 1, count == 0 {
+            zeroStreak += 1
+            if zeroStreak >= 2 {
+                onPanelCleared?()
+                zeroStreak = 0
+                lastPanelBannerCount = count
+            }
+        } else {
+            zeroStreak = 0
+            lastPanelBannerCount = count
+        }
+        return true
+    }
+
+    private func countBanners(_ element: AXUIElement, depth: Int) -> Int {
+        guard depth < 9 else { return 0 }
+        var n = 0
+        let subrole = string(of: element, attribute: kAXSubroleAttribute as String) ?? ""
+        if subrole == "AXNotificationCenterBannerStack" || subrole == "AXNotificationCenterBanner" {
+            n += 1
+        }
+        for child in elements(of: element, attribute: kAXChildrenAttribute as String) {
+            n += countBanners(child, depth: depth + 1)
+        }
+        return n
     }
 
     private func collect(_ element: AXUIElement, depth: Int) {

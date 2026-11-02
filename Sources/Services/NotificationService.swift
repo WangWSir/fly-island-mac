@@ -418,6 +418,13 @@ final class NotificationService: ObservableObject {
                 self.onNew?(item)
             }
         }
+        w.onPanelCleared = { [weak self] in
+            guard let self, !self.items.isEmpty else { return }
+            self.items.removeAll()
+            if ProcessInfo.processInfo.environment["FLYISLAND_DEBUG"] != nil {
+                NSLog("FlyIsland: 通知中心面板已清空，本地同步清空（不等数据库落盘）")
+            }
+        }
         w.start()
         axWatcher = w
     }
