@@ -18,7 +18,7 @@ struct ExpandedContent: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 2)
-            .padding(.bottom, 14)
+            .padding(.bottom, model.tab == .settings ? 0 : 14)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(width: metrics.width, height: metrics.height, alignment: .top)

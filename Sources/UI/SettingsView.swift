@@ -13,8 +13,58 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 10) {
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 10) {
+                    content
+                }
+                // 留出渐隐带的高度，滚到底时最后一行能完整露出
+                .padding(.bottom, 22)
+            }
+            .bottomFade(height: 26)
+
+            footer
+        }
+        .onAppear { launchAtLogin = settings.launchAtLogin }
+        .onChange(of: launchAtLogin) { newValue in
+            if newValue != settings.launchAtLogin {
+                settings.launchAtLogin = newValue
+            }
+        }
+    }
+
+    /// 固定的底部操作栏：不参与滚动，也不受渐隐遮罩影响
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.11))
+                .frame(height: 0.5)
+
+            HStack(spacing: 6) {
+                IslandTextButton(title: "清空通知", symbol: "bell.slash") {
+                    notifications.clearAll()
+                }
+                IslandTextButton(title: "清空剪贴板", symbol: "trash") {
+                    model.clipboard.clearAll()
+                }
+                Spacer(minLength: 0)
+                Text(version)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textTertiary.opacity(0.8))
+                IslandTextButton(title: "退出", symbol: "power") {
+                    NSApp.terminate(nil)
+                }
+            }
+            .padding(.horizontal, 2)
+            .frame(height: 26)
+        }
+        .background(Theme.base)
+        // 让底栏离开岛的圆角弧线，避免被下沿裁到
+        .padding(.bottom, 14)
+    }
+
+    @ViewBuilder
+    private var content: some View {
                 group("常规") {
                     settingRow("悬停展开", subtitle: "鼠标停在岛上时自动展开") {
                         IslandToggle(isOn: $settings.hoverExpand)
@@ -58,34 +108,6 @@ struct SettingsView: View {
                                   granted: Permissions.accessibility,
                                   action: { Permissions.requestAccessibility() })
                 }
-
-                HStack(spacing: 6) {
-                    IslandTextButton(title: "清空通知", symbol: "bell.slash") {
-                        notifications.clearAll()
-                    }
-                    IslandTextButton(title: "清空剪贴板", symbol: "trash") {
-                        model.clipboard.clearAll()
-                    }
-                    Spacer(minLength: 0)
-                    Text(version)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textTertiary.opacity(0.8))
-                    IslandTextButton(title: "退出", symbol: "power") {
-                        NSApp.terminate(nil)
-                    }
-                }
-                .padding(.horizontal, 2)
-                .padding(.top, 4)
-            }
-            .padding(.bottom, 6)
-        }
-        .bottomFade(height: 30)
-        .onAppear { launchAtLogin = settings.launchAtLogin }
-        .onChange(of: launchAtLogin) { newValue in
-            if newValue != settings.launchAtLogin {
-                settings.launchAtLogin = newValue
-            }
-        }
     }
 
     // MARK: 组件
