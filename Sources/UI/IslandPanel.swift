@@ -54,6 +54,8 @@ final class IslandController {
     private var monitors: [Any] = []
     /// 当前是否把鼠标事件让给下层窗口
     private var clickThrough = false
+    /// 岛固定所在的屏幕（内置刘海屏），只在显示器配置变化时刷新
+    private var targetScreen: NSScreen
 
     /// 窗口最大尺寸（初始创建时使用，避免频繁重建窗口）
     private let maxWindow = CGSize(width: 660, height: 600)
@@ -61,7 +63,8 @@ final class IslandController {
     init(model: IslandModel) {
         self.model = model
 
-        let screen = ScreenGeometry.main
+        let screen = ScreenGeometry.preferred()
+        self.targetScreen = screen
         let frame = NSRect(x: (screen.frame.midX - maxWindow.width / 2).rounded(),
                            y: screen.frame.maxY - maxWindow.height,
                            width: maxWindow.width,
@@ -155,7 +158,7 @@ final class IslandController {
     }
 
     private func frame(for metrics: IslandMetrics) -> NSRect {
-        let screen = ScreenGeometry.main
+        let screen = targetScreen
         let width = min(maxWindow.width, metrics.width + 90)
         let height = min(maxWindow.height, metrics.height + 90)
         return NSRect(x: (screen.frame.midX - width / 2).rounded(),
@@ -165,9 +168,11 @@ final class IslandController {
     }
 
     private func reposition() {
-        model.notchWidth = ScreenGeometry.notchWidth(for: ScreenGeometry.main)
-        model.notchHeight = ScreenGeometry.notchHeight(for: ScreenGeometry.main)
+        targetScreen = ScreenGeometry.preferred()
+        model.notchWidth = ScreenGeometry.notchWidth(for: targetScreen)
+        model.notchHeight = ScreenGeometry.notchHeight(for: targetScreen)
         panel.setFrame(frame(for: model.metrics), display: true)
+        panel.orderFrontRegardless()
         syncHitRegion()
     }
 

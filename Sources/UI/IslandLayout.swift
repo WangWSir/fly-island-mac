@@ -81,7 +81,7 @@ enum IslandLayout {
     }
 }
 
-/// 屏幕几何：刘海尺寸与主屏坐标。
+/// 屏幕几何：刘海尺寸与目标屏坐标。
 enum ScreenGeometry {
     static func notchWidth(for screen: NSScreen) -> CGFloat {
         guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else {
@@ -96,5 +96,29 @@ enum ScreenGeometry {
         return inset > 10 ? inset : 32
     }
 
-    static var main: NSScreen { NSScreen.main ?? NSScreen.screens.first! }
+    /// 有刘海（内建屏）。NSScreen.main 会跟随焦点窗口跑到外接屏，不能用它定位岛。
+    static func hasNotch(_ screen: NSScreen) -> Bool {
+        guard let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea else {
+            return false
+        }
+        let w = screen.frame.width - left.width - right.width
+        return w > 40 && w < 400
+    }
+
+    static func isBuiltIn(_ screen: NSScreen) -> Bool {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return false
+        }
+        return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0
+    }
+
+    /// 岛固定挂在刘海屏上；没有刘海屏（合盖/外接）时退回内置屏，再退回带菜单栏的主显示器。
+    static func preferred() -> NSScreen {
+        let screens = NSScreen.screens
+        if let notched = screens.first(where: hasNotch) { return notched }
+        if let builtIn = screens.first(where: isBuiltIn) { return builtIn }
+        return screens.first ?? NSScreen.main ?? screens[0]
+    }
+
+    static var main: NSScreen { preferred() }
 }
