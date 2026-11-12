@@ -14,6 +14,8 @@ final class Settings: ObservableObject {
     @Published var autoCollapse: Bool { didSet { store.set(autoCollapse, forKey: "autoCollapse") } }
     @Published var showIdleDot: Bool { didSet { store.set(showIdleDot, forKey: "showIdleDot") } }
     @Published var lyricsEnabled: Bool { didSet { store.set(lyricsEnabled, forKey: "lyricsEnabled") } }
+    /// 没有刘海屏时（合盖接扩展屏）是否改在扩展屏显示，默认关闭
+    @Published var showOnExternalScreen: Bool { didSet { store.set(showOnExternalScreen, forKey: "showOnExternalScreen") } }
 
     init() {
         let d = UserDefaults.standard
@@ -27,6 +29,7 @@ final class Settings: ObservableObject {
             "autoCollapse": true,
             "showIdleDot": true,
             "lyricsEnabled": true,
+            "showOnExternalScreen": false,
         ])
         hoverExpand = d.bool(forKey: "hoverExpand")
         peekOnNotification = d.bool(forKey: "peekOnNotification")
@@ -37,6 +40,7 @@ final class Settings: ObservableObject {
         autoCollapse = d.bool(forKey: "autoCollapse")
         showIdleDot = d.bool(forKey: "showIdleDot")
         lyricsEnabled = d.bool(forKey: "lyricsEnabled")
+        showOnExternalScreen = d.bool(forKey: "showOnExternalScreen")
     }
 
     // 开机自启（macOS 13+ SMAppService）

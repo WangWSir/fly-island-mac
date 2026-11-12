@@ -78,6 +78,9 @@ struct SettingsView: View {
                     settingRow("开机自启动") {
                         IslandToggle(isOn: $launchAtLogin)
                     }
+                    settingRow("扩展屏显示", subtitle: "合盖或没有刘海屏时改在扩展屏显示") {
+                        IslandToggle(isOn: $settings.showOnExternalScreen)
+                    }
                 }
 
                 group("剪贴板") {

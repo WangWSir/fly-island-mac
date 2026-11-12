@@ -112,13 +112,28 @@ enum ScreenGeometry {
         return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0
     }
 
-    /// 岛固定挂在刘海屏上；没有刘海屏（合盖/外接）时退回内置屏，再退回带菜单栏的主显示器。
-    static func preferred() -> NSScreen {
-        let screens = NSScreen.screens
-        if let notched = screens.first(where: hasNotch) { return notched }
-        if let builtIn = screens.first(where: isBuiltIn) { return builtIn }
-        return screens.first ?? NSScreen.main ?? screens[0]
+    /// 岛固定挂在刘海屏上；没有刘海屏（合盖/外接）时返回 nil，由调用方决定是否隐藏。
+    static func notched() -> NSScreen? {
+        NSScreen.screens.first(where: hasNotch)
     }
 
-    static var main: NSScreen { preferred() }
+    /// 带菜单栏的主显示器（NSScreen.screens.first）
+    static func primary() -> NSScreen? {
+        NSScreen.screens.first
+    }
+
+    /// 是否为笔记本：合盖后内建屏消失，此时不该把岛挪到扩展屏
+    static let isLaptop: Bool = {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 0 else { return false }
+        var buf = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &buf, &size, nil, 0) == 0 else { return false }
+        return String(cString: buf).hasPrefix("MacBook")
+    }()
+
+    /// 兜底屏：非笔记本（Mac mini / Studio / iMac）无刘海时贴在主屏菜单栏
+    static func preferred() -> NSScreen? {
+        if let notched = notched() { return notched }
+        return isLaptop ? nil : primary()
+    }
 }

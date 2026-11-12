@@ -19,7 +19,12 @@ enum SelfTest {
         print("== 权限 ==")
         print("完全磁盘访问: \(Permissions.fullDiskAccess)")
         print("辅助功能: \(Permissions.accessibility)")
-        print("刘海尺寸: \(ScreenGeometry.notchWidth(for: ScreenGeometry.main)) x \(ScreenGeometry.notchHeight(for: ScreenGeometry.main))")
+        if let screen = ScreenGeometry.preferred() {
+            print("刘海尺寸: \(ScreenGeometry.notchWidth(for: screen)) x \(ScreenGeometry.notchHeight(for: screen))")
+        } else {
+            print("刘海尺寸: 无刘海屏（当前隐藏）")
+        }
+        print("笔记本: \(ScreenGeometry.isLaptop)  目标屏: \(ScreenGeometry.preferred()?.localizedName ?? "无")")
 
         let notifications = NotificationService()
         notifications.start()

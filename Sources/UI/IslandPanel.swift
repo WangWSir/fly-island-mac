@@ -54,8 +54,10 @@ final class IslandController {
     private var monitors: [Any] = []
     /// 当前是否把鼠标事件让给下层窗口
     private var clickThrough = false
-    /// 岛固定所在的屏幕（内置刘海屏），只在显示器配置变化时刷新
-    private var targetScreen: NSScreen
+    /// 岛固定所在的屏幕（内置刘海屏）。nil = 当前没有刘海屏，按策略隐藏
+    private var targetScreen: NSScreen?
+    /// 从状态栏菜单显式唤起时，临时允许贴在当前屏（避免隐藏后菜单点了没反应）
+    private var temporarilyOnPrimary = false
 
     /// 窗口最大尺寸（初始创建时使用，避免频繁重建窗口）
     private let maxWindow = CGSize(width: 660, height: 600)
@@ -63,7 +65,7 @@ final class IslandController {
     init(model: IslandModel) {
         self.model = model
 
-        let screen = ScreenGeometry.preferred()
+        let screen = ScreenGeometry.notched() ?? ScreenGeometry.primary() ?? NSScreen.main ?? NSScreen.screens[0]
         self.targetScreen = screen
         let frame = NSRect(x: (screen.frame.midX - maxWindow.width / 2).rounded(),
                            y: screen.frame.maxY - maxWindow.height,
@@ -113,8 +115,8 @@ final class IslandController {
 
     func show() {
         model.onLayoutChange = { [weak self] in self?.syncHitRegion() }
+        applyScreen(force: true)
         syncHitRegion()
-        panel.orderFrontRegardless()
         startHoverTracking()
         installMonitors()
         observeScreenChanges()
@@ -123,6 +125,34 @@ final class IslandController {
     }
 
     var window: NSWindow { panel }
+
+    /// 选屏：刘海屏优先；没有刘海屏时（合盖/纯外接）默认不显示，非笔记本贴在主屏。
+    private func resolveScreen() -> NSScreen? {
+        if let notched = ScreenGeometry.notched() { return notched }
+        if temporarilyOnPrimary, let primary = ScreenGeometry.primary() { return primary }
+        if model.settings.showOnExternalScreen { return ScreenGeometry.primary() }
+        return ScreenGeometry.isLaptop ? nil : ScreenGeometry.primary()
+    }
+
+    /// 把窗口搬到目标屏；无目标屏则隐藏，但不影响后台服务（通知/剪贴板/媒体照常跑）
+    private func applyScreen(force: Bool = false) {
+        let screen = resolveScreen()
+        let changed = screen?.frame != targetScreen?.frame || force
+        targetScreen = screen
+
+        guard let screen else {
+            if panel.isVisible { panel.orderOut(nil) }
+            return
+        }
+        if changed {
+            model.notchWidth = ScreenGeometry.notchWidth(for: screen)
+            model.notchHeight = ScreenGeometry.notchHeight(for: screen)
+            panel.setFrame(frame(for: model.metrics), display: true)
+        }
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+    }
 
     private func syncHitRegion() {
         let m = model.metrics
@@ -158,7 +188,7 @@ final class IslandController {
     }
 
     private func frame(for metrics: IslandMetrics) -> NSRect {
-        let screen = targetScreen
+        guard let screen = targetScreen else { return panel.frame }
         let width = min(maxWindow.width, metrics.width + 90)
         let height = min(maxWindow.height, metrics.height + 90)
         return NSRect(x: (screen.frame.midX - width / 2).rounded(),
@@ -168,12 +198,11 @@ final class IslandController {
     }
 
     private func reposition() {
-        targetScreen = ScreenGeometry.preferred()
-        model.notchWidth = ScreenGeometry.notchWidth(for: targetScreen)
-        model.notchHeight = ScreenGeometry.notchHeight(for: targetScreen)
-        panel.setFrame(frame(for: model.metrics), display: true)
-        panel.orderFrontRegardless()
+        applyScreen(force: true)
         syncHitRegion()
+        // 显示器配置变化后 NSScreen 要过一会儿才稳定，补两次校正
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.applyScreen() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.applyScreen() }
     }
 
     private func observeScreenChanges() {
@@ -205,6 +234,15 @@ final class IslandController {
     }
 
     private func pollHover() {
+        healScreenIfNeeded()
+
+        // 隐藏态（无刘海屏）下不参与悬停
+        guard panel.isVisible, targetScreen != nil else {
+            if model.hovering { model.hovering = false }
+            updateClickThrough(inside: false)
+            return
+        }
+
         let point = NSEvent.mouseLocation
         let inside = islandScreenRect().insetBy(dx: -4, dy: -2).contains(point)
 
@@ -235,6 +273,19 @@ final class IslandController {
         if !clickThrough {
             clickThrough = true
             panel.ignoresMouseEvents = true
+        }
+    }
+
+    /// 窗口被系统搬到别的屏（切 Space、改分辨率、系统偏好设置里改主屏）时拉回来
+    private func healScreenIfNeeded() {
+        let resolved = resolveScreen()
+        if resolved?.frame != targetScreen?.frame {
+            applyScreen()
+            return
+        }
+        guard let screen = resolved, panel.isVisible else { return }
+        if panel.screen?.frame != screen.frame {
+            panel.setFrame(frame(for: model.metrics), display: true)
         }
     }
 
@@ -311,6 +362,12 @@ final class IslandController {
     }
 
     func expand(tab: IslandTab) {
+        // 隐藏态（合盖接扩展屏）下从菜单唤起：临时贴到当前主屏，否则点了没反应
+        if targetScreen == nil || !panel.isVisible {
+            temporarilyOnPrimary = true
+            applyScreen(force: true)
+            syncHitRegion()
+        }
         model.expand(tab: tab, byClick: true)
     }
 

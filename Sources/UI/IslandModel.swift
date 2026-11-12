@@ -37,9 +37,10 @@ final class IslandModel: ObservableObject {
     }
 
     func start() {
-        let screen = ScreenGeometry.main
-        notchWidth = ScreenGeometry.notchWidth(for: screen)
-        notchHeight = ScreenGeometry.notchHeight(for: screen)
+        if let screen = ScreenGeometry.preferred() {
+            notchWidth = ScreenGeometry.notchWidth(for: screen)
+            notchHeight = ScreenGeometry.notchHeight(for: screen)
+        }
 
         clipboard.maxItems = { [weak self] in self?.settings.maxClips ?? 200 }
         clipboard.captureImages = { [weak self] in self?.settings.captureImages ?? true }
