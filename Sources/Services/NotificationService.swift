@@ -233,6 +233,7 @@ final class NotificationService: ObservableObject {
         if !bootstrapped {
             items = rows
                 .filter { !Self.blocklist.contains($0.bundleID) }
+                .filter(Self.isDeliveredToUser)
                 .filter { $0.date.timeIntervalSinceNow > -Self.retention }
                 .filter { !$0.title.trimmed.isEmpty || !$0.body.trimmed.isEmpty }
                 .map { NotificationItem(id: $0.id, bundleID: $0.bundleID, title: $0.title,
@@ -244,13 +245,17 @@ final class NotificationService: ObservableObject {
 
         // 新增判定：用 seenIDs 集合（而非 lastID 单调递增），清空重置自增序列也不漏
         var fresh: [NotificationItem] = []
+        var accepted = Set<Int64>()
         for row in rows where !seenIDs.contains(row.id) {
+            guard Self.isDeliveredToUser(row) else { continue }
             guard !Self.blocklist.contains(row.bundleID) else { continue }
             guard !row.title.trimmed.isEmpty || !row.body.trimmed.isEmpty else { continue }
             fresh.append(NotificationItem(id: row.id, bundleID: row.bundleID, title: row.title,
                                           body: row.body, date: row.date, isRead: false))
+            accepted.insert(row.id)
         }
-        seenIDs.formUnion(rows.map(\.id))
+        // 只把真正展示过的记进 seenIDs：presented 之后若翻成 1，还能补进来
+        seenIDs.formUnion(accepted)
         guard !fresh.isEmpty else { return true }
 
         if ProcessInfo.processInfo.environment["FLYISLAND_DEBUG"] != nil {
@@ -275,7 +280,13 @@ final class NotificationService: ObservableObject {
         let title: String
         let body: String
         let date: Date
+        /// 系统是否真的把这条推给了用户。presented=0 的是「只落库不展示」的后台通知
+        let presented: Bool
     }
+
+    /// 是否该进列表：presented=0 的通知（代理软件、BetterDisplay 之类的静默推送）
+    /// 系统通知中心从来不显示，只有数据库留痕 —— 展示它们就成了「凭空多出来的通知」。
+    private static func isDeliveredToUser(_ row: Row) -> Bool { row.presented }
 
     /// 把 WAL 数据库连文件一起拷到缓存目录再读，避免干扰系统进程
     private func snapshotDatabase() -> URL? {
@@ -318,7 +329,7 @@ final class NotificationService: ObservableObject {
         // 不依赖 rec_id 单调递增 —— 清空会重置自增序列，rec_id 可能回绕。
         let order = initial ? "DESC" : "ASC"
         let sql = """
-        SELECT r.rec_id, a.identifier, r.delivered_date, r.data
+        SELECT r.rec_id, a.identifier, r.delivered_date, r.presented, r.data
         FROM record r JOIN app a ON r.app_id = a.app_id
         WHERE r.delivered_date > ?
         ORDER BY r.rec_id \(order) LIMIT 500;
@@ -333,11 +344,12 @@ final class NotificationService: ObservableObject {
             let recID = sqlite3_column_int64(stmt, 0)
             let bundle = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
             let delivered = sqlite3_column_double(stmt, 2)
+            let presented = sqlite3_column_type(stmt, 3) == SQLITE_NULL ? true : sqlite3_column_int(stmt, 3) != 0
 
             var title = ""
             var body = ""
-            if let blob = sqlite3_column_blob(stmt, 3) {
-                let len = Int(sqlite3_column_bytes(stmt, 3))
+            if let blob = sqlite3_column_blob(stmt, 4) {
+                let len = Int(sqlite3_column_bytes(stmt, 4))
                 let data = Data(bytes: blob, count: len)
                 if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
                    let req = plist["req"] as? [String: Any] {
@@ -347,7 +359,7 @@ final class NotificationService: ObservableObject {
                 }
             }
             let date = Date(timeIntervalSince1970: delivered + Self.appleEpoch)
-            rows.append(Row(id: recID, bundleID: bundle, title: title, body: body, date: date))
+            rows.append(Row(id: recID, bundleID: bundle, title: title, body: body, date: date, presented: presented))
         }
         return rows
     }
